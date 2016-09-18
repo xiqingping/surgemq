@@ -22,7 +22,7 @@ import (
 
 	"github.com/surge/glog"
 	"github.com/surgemq/message"
-	"github.com/surgemq/surgemq/sessions"
+	"github.com/xiqingping/surgemq/sessions"
 )
 
 var (
@@ -266,11 +266,25 @@ func (this *service) processAcked(ackq *sessions.Ackqueue) {
 	}
 }
 
+func (this *service) externTopic(topic []byte) ([]byte, bool) {
+	if topic[0] == '/' {
+		return append([]byte(this.cid()+"/"), topic...), true
+	}
+	return topic, false
+}
+
 // For PUBLISH message, we should figure out what QoS it is and process accordingly
 // If QoS == 0, we should just take the next step, no ack required
 // If QoS == 1, we should send back PUBACK, then take the next step
 // If QoS == 2, we need to put it in the ack queue, send back PUBREC
+
 func (this *service) processPublish(msg *message.PublishMessage) error {
+	orgTopic := msg.Topic()
+	if newTopic, n := this.externTopic(orgTopic); n {
+		msg.SetTopic(newTopic)
+		defer msg.SetTopic(orgTopic)
+	}
+
 	switch msg.QoS() {
 	case message.QosExactlyOnce:
 		this.sess.Pub2in.Wait(msg, nil)
@@ -312,6 +326,7 @@ func (this *service) processSubscribe(msg *message.SubscribeMessage) error {
 	this.rmsgs = this.rmsgs[0:0]
 
 	for i, t := range topics {
+		t, _ := this.externTopic(t)
 		rqos, err := this.topicsMgr.Subscribe(t, qos[i], &this.onpub)
 		if err != nil {
 			return err
